@@ -21,18 +21,31 @@ namespace CalcEngine
         {
             // handle enumerables
             var ienum = e as IEnumerable;
-            if (ienum != null)
-            {
-                foreach (var value in ienum)
-                {
-                    AddValue(value);
-                }
-                return;
-            }
+				if (ienum != null)
+				{
+					AddRange(ienum);
+					return;
+				}
+				var result = e.Evaluate();
+				
+			  ienum = result as IEnumerable;
+				if (ienum != null && !(ienum is string))
+				{
+					AddRange(ienum);
+					return;
+				}
 
             // handle expressions
-            AddValue(e.Evaluate());
+            AddValue(result);
         }
+
+		  private void AddRange(IEnumerable ienum)
+		  {
+			  foreach (var value in ienum)
+			  {
+				  AddValue(value);
+			  }
+		  }
         public void AddValue(object value)
         {
             // conversions
@@ -51,12 +64,17 @@ namespace CalcEngine
                     value = (bool)value ? 1 : 0;
                 }
             }
+            else if (value is bool)
+            {
+                value = "";
+            }
 
             // convert all numeric values to doubles
             if (value != null)
             {
-                var typeCode = Type.GetTypeCode(value.GetType());
-                if (typeCode >= TypeCode.Char && typeCode <= TypeCode.Decimal)
+                //var typeCode = Type.GetTypeCode(value.GetType());
+                //if (typeCode >= TypeCode.Char && typeCode <= TypeCode.Decimal)
+					if (value is IConvertible && !(value is string))
                 {
                     value = Convert.ChangeType(value, typeof(double), System.Globalization.CultureInfo.CurrentCulture);
                 }

@@ -28,20 +28,16 @@ namespace CalcEngine
         {
             get
             {
-                Expression x = null;
+                Expression x;
                 WeakReference wr;
-
-                // get expression from cache
-                if (_dct.TryGetValue(expression, out wr))
+                if (_dct.TryGetValue(expression, out wr) && wr.IsAlive)
                 {
                     x = wr.Target as Expression;
                 }
-
-                // if failed, parse now and store
-                if (x == null)
+                else
                 {
                     // remove all dead references from dictionary
-                    if (_dct.Count > 100 && _hitCount++ > 100)
+                    if (wr != null && _dct.Count > 100 && _hitCount++ > 100)
                     {
                         RemoveDeadReferences();
                         _hitCount = 0;
@@ -51,8 +47,6 @@ namespace CalcEngine
                     x = _ce.Parse(expression);
                     _dct[expression] = new WeakReference(x);
                 }
-
-                // return the parsed expression
                 return x;
             }
         }

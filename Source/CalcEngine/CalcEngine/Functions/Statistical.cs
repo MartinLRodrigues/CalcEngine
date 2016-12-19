@@ -94,9 +94,9 @@ namespace CalcEngine
 #if DEBUG
         public static void Test(CalcEngine ce)
         {
-            ce.Test("Average(1, 3, 3, 1, true, false, \"hello\")", 2.0);
+            ce.Test("Average(1, 3, 3, 1, true, false, \"hello\")", 2);
             ce.Test("AverageA(1, 3, 3, 1, true, false, \"hello\")", (1 + 3 + 3 + 1 + 1 + 0 + 0) / 7.0);
-            ce.Test("Count(1, 3, 3, 1, true, false, \"hello\")", 4.0);
+            ce.Test("Count(1, 3, 3, 1, true, false, \"hello\")", 4);
             ce.Test("CountA(1, 3, 3, 1, true, false, \"hello\")", 7.0);
         }
 #endif
