@@ -47,5 +47,6 @@ namespace CalcEngine
         POWER, // POWER
         OPEN, CLOSE, END, COMMA, PERIOD, // GROUP
         ATOM, // LITERAL, IDENTIFIER
+        SUPPRESS, // SUPPRESS AUDIT
     }
 }

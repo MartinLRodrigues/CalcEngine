@@ -25,37 +25,98 @@ namespace CalcEngine
 
         internal Token _token;
         static CultureInfo _ci = CultureInfo.InvariantCulture;
-
+		  internal Observer _observer;
         #endregion
 
         //---------------------------------------------------------------------------
         #region ** ctors
 
-        internal Expression()
+		  public Expression(Observer observer)
 		{
             _token = new Token(null, TKID.ATOM, TKTYPE.IDENTIFIER);
+				_observer = observer;
 		}
-        internal Expression(object value)
+        public Expression(Observer observer, object value):this(observer)
         {
             _token = new Token(value, TKID.ATOM, TKTYPE.LITERAL);
         }
-        internal Expression(Token tk)
+		  internal Expression(Observer observer, Token tk)
+			  : this(observer)
         {
             _token = tk;
         }
 
         #endregion
 
+		  public Observer Observer
+		  {
+			  get
+			  {
+				  return _observer;
+			  }
+		  }
         //---------------------------------------------------------------------------
         #region ** object model
 
-		public virtual object Evaluate()
+		public object Evaluate()
+		{
+			object result;
+            PreEvaluate();
+			  
+			result = this.EvaluateExpression();
+
+            PostEvaluate(result);
+			  
+			return result;
+		}
+
+        public void PostEvaluate(object result)
+        {
+            if (_observer != null)
+                _observer.DoOnPostEvaluate(new EvaluateEventArgs(this, result));
+        }
+
+        public void PreEvaluate()
+        {
+            if (_observer != null)
+                _observer.DoOnPreEvaluate(new EvaluateEventArgs(this));
+        }
+
+        public void PostDependencyCheck()
+        {
+            if (_observer != null)
+                _observer.DoOnPostDependencyCheck(new EventArgs());
+        }
+
+        public void PreDependencyCheck()
+        {
+            if (_observer != null)
+                _observer.DoOnPreDependencyCheck(new EventArgs());
+        }
+
+        public void BeginSuppress()
+        {
+            if (_observer != null)
+                _observer.DoOnBeginSuppress(new EventArgs());
+        }
+        
+        public void EndSuppress()
+        {
+            if (_observer != null)
+                _observer.DoOnEndSuppress(new EventArgs());
+        }
+
+		protected virtual object EvaluateExpression()
 		{
             if (_token.Type != TKTYPE.LITERAL)
             {
                 throw new ArgumentException("Bad expression.");
             }
-			return _token.Value;
+			  
+			  object result = _token.Value;
+			  //audit.AppendFormat("{0} = {1}",this.ToString(), result);
+			  
+			  return result;
 		}
         public virtual Expression Optimize()
         {
@@ -151,6 +212,7 @@ namespace CalcEngine
             return (DateTime)Convert.ChangeType(v, typeof(DateTime), _ci);
         }
 
+		 
         #endregion
 
         //---------------------------------------------------------------------------
@@ -161,7 +223,7 @@ namespace CalcEngine
             // get both values
             var c1 = this.Evaluate() as IComparable;
             var c2 = other.Evaluate() as IComparable;
-
+            
             // handle nulls
             if (c1 == null && c2 == null)
             {
@@ -179,7 +241,10 @@ namespace CalcEngine
             // make sure types are the same
             if (c1.GetType() != c2.GetType())
             {
-                c2 = Convert.ChangeType(c2, c1.GetType()) as IComparable;
+                if (c1 is IConvertible)
+                    c2 = Convert.ChangeType(c2, (c1 as IConvertible).GetTypeCode()) as IComparable;
+                else
+                    c2 = Convert.ChangeType(c2, c1.GetType()) as IComparable;
             }
 
             // compare
@@ -187,7 +252,45 @@ namespace CalcEngine
         }
 
         #endregion
-    }
+
+		  public override string ToString()
+		  {
+			  return (_token.Value == null)? string.Empty : _token.Value.ToString();
+		  }
+
+          public static void BuildList(StringBuilder sb, IEnumerable objects, Action<StringBuilder> appendMethod)
+		  {
+              BuildList(sb, objects, (sb2, o) => BuildParameterList(sb2, o, appendMethod), appendMethod);
+		  }
+
+		  public static void BuildList(StringBuilder sb, IEnumerable objects, Action<StringBuilder, object> method, Action<StringBuilder> appendMethod)
+		  {
+			  bool firstTime = true;
+			  if (objects != null)
+			  {
+				  foreach (object value in (objects))
+				  {
+                      if (firstTime)
+                          firstTime = false;
+                      else
+                          appendMethod(sb);
+
+					  method(sb, value);
+				  }
+			  }
+		  }
+          public static void BuildParameterList(StringBuilder sb, object p, Action<StringBuilder> appendMethod)
+		  {
+			  if (p is IEnumerable)
+			  {
+                  sb.AppendLine("{");
+				  BuildList(sb, p as IEnumerable, appendMethod);
+				  sb.Append(" }");
+			  }
+			  else
+				  sb.Append(p.ToString());
+		  }
+	}
     /// <summary>
     /// Unary expression, e.g. +123
     /// </summary>
@@ -197,13 +300,13 @@ namespace CalcEngine
 		Expression	_expr;
 
         // ** ctor
-		public UnaryExpression(Token tk, Expression expr) : base(tk)
+		public UnaryExpression(Observer observer, Token tk, Expression expr) : base(observer, tk)
 		{
 			_expr = expr;
 		}
 
         // ** object model
-		override public object Evaluate()
+		override protected object EvaluateExpression()
 		{
             switch (_token.ID)
 			{
@@ -211,6 +314,11 @@ namespace CalcEngine
                     return +(double)_expr;
 				case TKID.SUB:
                     return -(double)_expr;
+                case TKID.SUPPRESS:
+                    this.BeginSuppress();
+                    object result = _expr.Evaluate();
+                    this.EndSuppress();
+                    return result;
 			}
 			throw new ArgumentException("Bad expression.");
 		}
@@ -218,9 +326,14 @@ namespace CalcEngine
         {
             _expr = _expr.Optimize();
             return _expr._token.Type == TKTYPE.LITERAL
-                ? new Expression(this.Evaluate())
+                ? new Expression(_observer, this.EvaluateExpression())
                 : this;
         }
+
+		  public override string ToString()
+		  {
+			  return base.ToString() + " " + _expr.ToString();
+		  }
 	}
     /// <summary>
     /// Binary expression, e.g. 1+2
@@ -232,14 +345,14 @@ namespace CalcEngine
 		Expression	_rgt;
 
         // ** ctor
-		public BinaryExpression(Token tk, Expression exprLeft, Expression exprRight) : base(tk)
+		public BinaryExpression(Observer observer, Token tk, Expression exprLeft, Expression exprRight) : base(observer, tk)
 		{
 			_lft  = exprLeft;
 			_rgt = exprRight;
 		}
 
         // ** object model
-		override public object Evaluate()
+		override protected object EvaluateExpression()
 		{
 			// handle comparisons
             if (_token.Type == TKTYPE.COMPARE)
@@ -247,12 +360,12 @@ namespace CalcEngine
                 var cmp = _lft.CompareTo(_rgt);
                 switch (_token.ID)
                 {
-                    case TKID.GT: return cmp > 0;
-                    case TKID.LT: return cmp < 0;
-                    case TKID.GE: return cmp >= 0;
-                    case TKID.LE: return cmp <= 0;
-                    case TKID.EQ: return cmp == 0;
-                    case TKID.NE: return cmp != 0;
+						 case TKID.GT: return cmp > 0;
+						 case TKID.LT: return cmp < 0;
+						 case TKID.GE: return cmp >= 0;
+						 case TKID.LE: return cmp <= 0;
+						 case TKID.EQ: return cmp == 0;
+						 case TKID.NE: return cmp != 0;
                 }
             }
 
@@ -261,16 +374,16 @@ namespace CalcEngine
 			{
 				case TKID.ADD: 
                     return (double)_lft + (double)_rgt;
-				case TKID.SUB: 
-                    return (double)_lft - (double)_rgt;
-				case TKID.MUL: 
-                    return (double)_lft * (double)_rgt;
-				case TKID.DIV: 
-                    return (double)_lft / (double)_rgt;
-				case TKID.DIVINT: 
-                    return (double)(int)((double)_lft / (double)_rgt);
-				case TKID.MOD: 
-                    return (double)(int)((double)_lft % (double)_rgt);
+				case TKID.SUB:
+						  return (double)_lft - (double)_rgt;
+				case TKID.MUL:
+						  return (double)_lft * (double)_rgt;
+				case TKID.DIV:
+						  return (double)_lft / (double)_rgt;
+				case TKID.DIVINT:
+						  return  (double)(int)((double)_lft / (double)_rgt);
+				case TKID.MOD:
+						  return (double)(int)((double)_lft % (double)_rgt);
 				case TKID.POWER:
                     var a = (double)_lft;
                     var b = (double)_rgt;
@@ -289,37 +402,44 @@ namespace CalcEngine
             _lft = _lft.Optimize();
             _rgt = _rgt.Optimize();
             return _lft._token.Type == TKTYPE.LITERAL && _rgt._token.Type == TKTYPE.LITERAL
-                ? new Expression(this.Evaluate())
+                ? new Expression(_observer, this.EvaluateExpression())
                 : this;
         }
+
+		  public override string ToString()
+		  {
+			  return string.Format("({0}) {1} ({2})", _lft.ToString(), base.ToString(), _rgt.ToString());
+		  }
     }
     /// <summary>
     /// Function call expression, e.g. sin(0.5)
     /// </summary>
-    class FunctionExpression : Expression
+	public class FunctionExpression : Expression
     {
         // ** fields
-        FunctionDefinition _fn;
+        internal FunctionDefinition _fn;
         List<Expression> _parms;
 
         // ** ctor
-        internal FunctionExpression()
+        internal FunctionExpression(Observer observer): base(observer)
         {
         }
-        public FunctionExpression(FunctionDefinition function, List<Expression> parms)
+        public FunctionExpression(Observer observer, FunctionDefinition function, List<Expression> parms): base(observer)
         {
             _fn = function;
             _parms = parms;
         }
 
         // ** object model
-        override public object Evaluate()
+        override protected object EvaluateExpression()
         {
             return _fn.Function(_parms);
         }
+
         public override Expression Optimize()
         {
             bool allLits = true;
+            
             if (_parms != null)
             {
                 for (int i = 0; i < _parms.Count; i++)
@@ -332,28 +452,61 @@ namespace CalcEngine
                     }
                 }
             }
-            return allLits
-                ? new Expression(this.Evaluate())
+            // only deterministic functions with literal parameters can be optimized
+            return allLits && _fn.Deterministic
+                ? new Expression(_observer, this.EvaluateExpression())
                 : this;
         }
+		  public override string ToString()
+		  {
+			  StringBuilder sb = new StringBuilder();
+			  sb.Append(_fn.Name);
+			  sb.Append("(");
+			  Expression.BuildList(sb, _parms, s => s.Append(", "));
+			  sb.Append(")");
+			  return sb.ToString();
+		  }
     }
+
     /// <summary>
     /// Simple variable reference.
     /// </summary>
     class VariableExpression : Expression
     {
-        IDictionary<string, object> _dct;
+        Dictionary<string, Variable> _dct;
         string _name;
 
-        public VariableExpression(IDictionary<string, object> dct, string name)
+        public Variable Variable
+        {
+            get
+            {
+                return _dct[_name];
+            }
+        }
+
+        public VariableExpression(Observer observer, Dictionary<string, Variable> dct, string name): base(observer)
         {
             _dct = dct;
             _name = name;
         }
-        public override object Evaluate()
+        protected override object EvaluateExpression()
         {
-            return _dct[_name];
-        }
+            Variable v = this.Variable;
+            if (v != null)
+            {
+                return v.Value;
+            }
+            return null;
+		  }
+
+		  public override string ToString()
+		  {
+              Variable v = this.Variable;
+              if (v != null)
+                  return v.ToString();
+
+			  return _name;
+		  }
     }
     /// <summary>
     /// Expression based on an object's properties.
@@ -365,7 +518,7 @@ namespace CalcEngine
         List<BindingInfo> _bindingPath;
 
         // ** ctor
-        internal BindingExpression(CalcEngine engine, List<BindingInfo> bindingPath, CultureInfo ci)
+        internal BindingExpression(Observer observer, CalcEngine engine, List<BindingInfo> bindingPath, CultureInfo ci): base(observer)
         {
             _ce = engine;
             _bindingPath = bindingPath;
@@ -373,7 +526,7 @@ namespace CalcEngine
         }
 
         // ** object model
-        override public object Evaluate()
+        override protected object EvaluateExpression()
         {
             return GetValue(_ce.DataContext);
         }
@@ -439,6 +592,17 @@ namespace CalcEngine
             // all done
             return obj;
         }
+		  public override string ToString()
+		  {
+			  StringBuilder sb = new StringBuilder();
+			  sb.Append(_ce.DataContext.GetType().Name);
+			  foreach (BindingInfo bi in _bindingPath)
+			  {
+				  sb.Append(".");
+				  sb.Append(bi.Name);
+			  }
+			  return sb.ToString();
+		  }
     }
     /// <summary>
     /// Helper used for building BindingExpression objects.
@@ -465,17 +629,17 @@ namespace CalcEngine
         object _value;
 
         // ** ctor
-        internal XObjectExpression(object value)
+        internal XObjectExpression(Observer observer, object value): base(observer)
         {
             _value = value;
         }
 
         // ** object model
-        public override object Evaluate()
+        protected override object EvaluateExpression()
         {
             // use IValueObject if available
             var iv = _value as IValueObject;
-            if (iv != null)
+				if (iv != null)
             {
                 return iv.GetValue();
             }

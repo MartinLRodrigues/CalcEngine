@@ -26,8 +26,8 @@ namespace CalcEngine
             Test("1e+3", 1000.0);
 
             // test simple variables
-            Variables.Add("one", 1);
-            Variables.Add("two", 2);
+            SetVariable("one", 1);
+            SetVariable("two", 2);
             Test("one + two", 3);
             Test("(two + two)^2", 16);
             Variables.Clear();
